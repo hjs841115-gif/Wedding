@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>宴會廳 1:1 平面圖與座位管理系統</title>
+  <link rel="stylesheet" href="styles.css?v=13">
+  <!-- FontAwesome for UI icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+</head>
+<body>
+  <!-- Top-level z-index 9998/9999 Card Container (Allows dragging cards ANYWHERE on full screen!) -->
+  <div id="pinned-cards-container"></div>
+  
+  <div id="floating-table-tooltip" class="floating-tooltip">
+    <div class="floating-tooltip-header" id="floating-card-drag-handle">
+      <span id="floating-card-title"><i class="fa-solid fa-up-down-left-right"></i> 桌次賓客名單</span>
+      <div style="display:flex; align-items:center; gap:6px;">
+        <button id="floating-card-pin-btn" class="btn-pin" title="釘選此桌卡片獨立顯示"><i class="fa-solid fa-thumbtack"></i> 釘選</button>
+        <button id="floating-card-close" title="關閉卡片">&times;</button>
+      </div>
+    </div>
+    <div class="floating-tooltip-body" id="floating-card-body"></div>
+  </div>
+
+  <div class="app-container">
+    <!-- Top Header & Navigation -->
+    <header class="app-header">
+      <div class="brand">
+        <i class="fa-solid fa-chair-office brand-icon"></i>
+        <h1>宴會廳 1:1 平面圖與座位管理系統</h1>
+        <span class="badge badge-primary">20 桌 / 202 席</span>
+      </div>
+
+      <!-- Quick Stats -->
+      <div class="header-stats">
+        <div class="stat-item">
+          <span class="stat-label">總桌數</span>
+          <span class="stat-value" id="stat-tables">20</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">已排入</span>
+          <span class="stat-value text-success" id="stat-occupied">0</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">空席數</span>
+          <span class="stat-value text-muted" id="stat-available">202</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">VIP 貴賓</span>
+          <span class="stat-value text-warning" id="stat-vip">0</span>
+        </div>
+      </div>
+
+      <!-- Main Toolbar Controls -->
+      <div class="header-actions">
+        <button id="btn-pin-all-tables" class="btn btn-outline" title="釘選全場 20 桌卡片">
+          <i class="fa-solid fa-thumbtack" style="color:var(--warning);"></i> 釘選全場卡片
+        </button>
+        <button id="btn-unpin-all-tables" class="btn btn-outline" title="收起所有釘選卡片" style="display:none;">
+          <i class="fa-solid fa-broom"></i> 清除釘選
+        </button>
+        <button id="btn-export-image" class="btn btn-primary" title="匯出高畫質圖表 (可貼至 PPT)">
+          <i class="fa-solid fa-file-image"></i> 匯出 PPT 圖表 (PNG)
+        </button>
+        <button id="btn-export-csv" class="btn btn-secondary" title="匯出賓客清單 (可開啟於 Word/Excel)">
+          <i class="fa-solid fa-file-csv"></i> 匯出 Word 清單 (CSV)
+        </button>
+        <button id="btn-save-load" class="btn btn-icon" title="存檔 / 讀取備份">
+          <i class="fa-solid fa-database"></i>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Workspace Area -->
+    <main class="workspace">
+      <!-- Left Panel: Pan/Zoom Interactive SVG Floor Plan -->
+      <section class="floorplan-section">
+        <div class="floorplan-toolbar">
+          <div class="toolbar-group">
+            <span class="toolbar-title"><i class="fa-solid fa-eye"></i> 對比原圖：</span>
+            <label class="switch">
+              <input type="checkbox" id="toggle-overlay" checked>
+              <span class="slider round"></span>
+            </label>
+            <input type="range" id="overlay-opacity" min="0" max="1" step="0.05" value="0.4" title="原圖不透明度" style="width: 65px;">
+            <span id="opacity-val" style="font-size: 12px; color: #64748b;">40%</span>
+          </div>
+
+          <div class="toolbar-group">
+            <span class="toolbar-title"><i class="fa-solid fa-user-tag" style="color:var(--primary);"></i> 姓名顯示：</span>
+            <select id="select-name-mode" style="font-size:12px; padding:4px 8px; border-radius:4px; border:1px solid var(--border-color); outline:none; font-weight:600;">
+              <option value="spoke">環狀放射名標 (直接蓋在座位編號上，顯示完整姓名)</option>
+              <option value="hovercard">全螢幕自由拖拽卡片 (釘選後自動引出虛線連結圓桌)</option>
+              <option value="none">隱藏姓名 (僅顯示座號數字)</option>
+            </select>
+          </div>
+
+          <div class="toolbar-group">
+            <div class="search-box">
+              <i class="fa-solid fa-magnifying-glass search-icon"></i>
+              <input type="text" id="search-input" placeholder="搜尋賓客或桌號..." autocomplete="off">
+              <button id="clear-search" class="clear-btn" style="display:none;"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+          </div>
+        </div>
+
+        <!-- SVG Viewport -->
+        <div class="svg-viewport" id="svg-viewport">
+          <!-- Dynamic Dashed Connector Line Overlay -->
+          <svg id="connector-lines-svg" style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:9997;"></svg>
+
+          <div class="svg-transform-wrapper" id="svg-wrapper">
+            <svg id="floorplan-svg" viewBox="0 0 1400 800" xmlns="http://www.w3.org/2000/svg">
+              <image id="svg-bg-image" href="original_floorplan.png" x="0" y="0" width="1400" height="800" opacity="0.4" preserveAspectRatio="none" visibility="visible" />
+              <g id="svg-graphics"></g>
+              <g id="svg-tables"></g>
+            </svg>
+          </div>
+
+          <div class="zoom-controls">
+            <button id="zoom-in" title="放大"><i class="fa-solid fa-plus"></i></button>
+            <button id="zoom-out" title="縮小"><i class="fa-solid fa-minus"></i></button>
+            <button id="zoom-reset" title="重置">100%</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Panel: Seating Management & Guest Editor -->
+      <aside class="editor-section">
+        <!-- Selected Table View -->
+        <div class="panel-card" id="table-detail-card">
+          <div class="card-header">
+            <div class="table-title">
+              <label style="font-size:12px; color:var(--text-muted); display:block;">編輯桌名：</label>
+              <input type="text" id="table-name-input" class="input-table-name" placeholder="請輸入桌名 (如: 貴賓桌)" style="font-size: 15px; font-weight: 700; border: 1px solid var(--border-color); border-radius: 4px; padding: 4px 8px; width: 150px;">
+              <span id="current-table-badge" class="badge">--</span>
+            </div>
+            <div class="card-actions">
+              <button id="btn-pin-current-table" class="btn btn-sm btn-outline" title="釘選本桌卡片獨立顯示">
+                <i class="fa-solid fa-thumbtack"></i> 釘選桌卡
+              </button>
+              <button id="btn-quick-fill" class="btn btn-sm btn-outline" title="快速貼上名單">
+                <i class="fa-solid fa-paste"></i> 貼上
+              </button>
+              <button id="btn-clear-table" class="btn btn-sm btn-danger-outline" title="清空本桌">
+                <i class="fa-solid fa-trash-can"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- Seat List Container -->
+          <div class="card-body scrollable">
+            <div id="empty-state" class="empty-state">
+              <i class="fa-solid fa-hand-pointer empty-icon"></i>
+              <p>點擊左側平面圖中的圓桌或座位<br>即可修改桌名與輸入座位賓客姓名</p>
+            </div>
+            <div id="seat-list" class="seat-list" style="display: none;">
+              <!-- 10~12 Seat items dynamically rendered -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Global Guest List Quick Lookup -->
+        <div class="panel-card guest-lookup-card">
+          <div class="card-header">
+            <h3><i class="fa-solid fa-users"></i> 全場賓客快速總覽</h3>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span class="guest-count" id="guest-lookup-count">0 人</span>
+              <button id="btn-refresh-guest-list" title="強制刷新賓客總覽清單" style="border:none; background:none; cursor:pointer; color:var(--primary); font-size:12px;"><i class="fa-solid fa-rotate-right"></i> 刷新</button>
+            </div>
+          </div>
+          <div class="card-body scrollable" id="guest-lookup-list">
+            <!-- Dynamic search list results -->
+          </div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <!-- Modal: Batch Name Import -->
+  <div class="modal" id="modal-batch-import">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-paste"></i> 批次貼上本桌名單</h3>
+        <button class="modal-close" data-close="modal-batch-import">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="help-text">請貼上姓名列表（每行一位賓客，自動依序填入本桌空白座位）：</p>
+        <textarea id="batch-names-input" rows="8" placeholder="例如：
+王大明
+李小華
+張偉名 (VIP)
+陳愛玲 (嬰兒)
+林小妹 (素)"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" data-close="modal-batch-import">取消</button>
+        <button class="btn btn-primary" id="btn-confirm-batch">確認匯入本桌</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Data Backup & Restore -->
+  <div class="modal" id="modal-backup">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-database"></i> 宴會座位資料備份與還原</h3>
+        <button class="modal-close" data-close="modal-backup">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="backup-actions">
+          <button class="btn btn-primary btn-block" id="btn-download-json">
+            <i class="fa-solid fa-download"></i> 下載 JSON 備份檔
+          </button>
+          <hr>
+          <p class="help-text">從舊有 JSON 備份檔還原座位：</p>
+          <input type="file" id="json-file-input" accept=".json" class="file-input">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="floorplan-svg.js?v=13"></script>
+  <script src="app.js?v=13"></script>
+</body>
+</html>
